@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=45", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "malicious-behavior-detection-telegram"
+version = "0.1.0"
+description = "analysis of bot and malicious behavior in telegram graph dataset"
+requires-python = ">=3.10"
+dependencies = []
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.black]
+line-length = 88
+
+[tool.setuptools.packages.find]
+where = ["src"]

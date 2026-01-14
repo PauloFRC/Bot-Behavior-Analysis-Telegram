@@ -1,0 +1,14 @@
+name: TELEGRAM
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.10.19
+  - pip
+  - ipykernel
+  - numpy
+  - pandas
+  - matplotlib
+  - scikit-learn
+  - tqdm
+  - seaborn
