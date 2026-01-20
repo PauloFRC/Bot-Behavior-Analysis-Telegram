@@ -58,38 +58,9 @@ MATCH (u:User)-[r:RAPID_SHARE]-(target:User)
 WITH u, sum(r.weight) as rapid_weight_sum, count(target) as rapid_partners
 SET u.synchronicity_score = rapid_weight_sum * log(rapid_partners + 1);
 
-// Cria score de flood
-MATCH (u:User)-[:SENT]->(m:Mensagem)
-WITH u, count(m) as total_msgs, count(distinct m.id_group_anonymous) as distinct_groups
-
-MATCH (u)-[:SENT]->(m)-[:HAS_TEXT]->(t:Texto)
-WITH u, total_msgs, distinct_groups, count(distinct t) as unique_texts
-
-WITH u, total_msgs, 
-     (toFloat(total_msgs) / CASE WHEN unique_texts = 0 THEN 1 ELSE toFloat(unique_texts) END) as repetition_ratio
-WHERE total_msgs > 5
-
-SET u.flooding_score = log10(total_msgs) * repetition_ratio;
-
-// Cria índices
-CREATE INDEX user_flood_score IF NOT EXISTS FOR (u:User) ON (u.flooding_score);
+// Cria arestas de semelhança de sincronicidade
 CREATE INDEX user_sync_score IF NOT EXISTS FOR (u:User) ON (u.synchronicity_score);
 
-// Cria arestas de semelhança de flooding
-MATCH (u:User)
-WHERE u.flooding_score > 1.0 
-WITH collect(u) as suspiciousUsers
-
-UNWIND suspiciousUsers as u1
-UNWIND suspiciousUsers as u2
-WITH u1, u2
-WHERE u1.id < u2.id
-  AND abs(u1.flooding_score - u2.flooding_score) / u1.flooding_score < 0.05
-
-MERGE (u1)-[r:FLOOD_SIMILAR]-(u2)
-SET r.weight = 1.0 - (abs(u1.flooding_score - u2.flooding_score) / u1.flooding_score);
-
-// Cria arestas de semelhança de sincronicidade
 MATCH (u:User)
 WHERE u.synchronicity_score > 0
 WITH collect(u) as suspiciousSync
@@ -160,3 +131,25 @@ WHERE u1.id < u2.id
 
 MERGE (u1)-[r:MISINFO_SIMILAR]-(u2)
 SET r.weight = 1.0 - (abs(u1.misinfo_score - u2.misinfo_score) / u1.misinfo_score);
+
+// Cria score de singularidade de mensagens
+MATCH (u:User)-[:SENT]->(m:Mensagem)-[:HAS_TEXT]->(t:Texto)
+WITH u, count(m) as total_msgs, count(DISTINCT t) as unique_texts
+
+MATCH (t)<-[:HAS_TEXT]-(:Mensagem)
+WITH u, total_msgs, unique_texts, 
+     count { (t)<-[:HAS_TEXT]-(:Mensagem) } AS total_text_usage
+
+SET u.content_originality = toFloat(unique_texts) / total_msgs,
+    u.content_uniqueness = toFloat(unique_texts) / total_text_usage;
+
+// Cria score de diversidade de conexões
+MATCH (u:User)-[:SHARES]-(other:User)
+WITH u, collect(DISTINCT other.id_most_active_group) as partner_groups
+
+MATCH (u)-[:SHARES]-(other:User)
+WITH u, partner_groups, 
+     count(other) as total_partners,
+     size(partner_groups) as unique_groups
+
+SET u.network_diversity = toFloat(unique_groups) / total_partners;

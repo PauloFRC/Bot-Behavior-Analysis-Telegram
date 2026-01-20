@@ -13,3 +13,5 @@ dependencies:
   - tqdm
   - seaborn
   - nltk
+  - networkx
+  - neo4j
