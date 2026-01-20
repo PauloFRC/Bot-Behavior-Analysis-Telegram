@@ -22,6 +22,38 @@ WITH u, total_msgs, distinct_groups, count(distinct t) as unique_texts
 
 WITH u, total_msgs, 
      (toFloat(total_msgs) / CASE WHEN unique_texts = 0 THEN 1 ELSE toFloat(unique_texts) END) as repetition_ratio
-WHERE total_msgs > 5 // Filter for minimum activity
+WHERE total_msgs > 5
 
 SET u.flooding_score = log10(total_msgs) * repetition_ratio;
+
+// Cria índices
+CREATE INDEX user_flood_score IF NOT EXISTS FOR (u:User) ON (u.flooding_score);
+CREATE INDEX user_sync_score IF NOT EXISTS FOR (u:User) ON (u.synchronicity_score);
+
+// Cria arestas de semelhança de flooding
+MATCH (u:User)
+WHERE u.flooding_score > 1.0 
+WITH collect(u) as suspiciousUsers
+
+UNWIND suspiciousUsers as u1
+UNWIND suspiciousUsers as u2
+WITH u1, u2
+WHERE u1.id < u2.id
+  AND abs(u1.flooding_score - u2.flooding_score) / u1.flooding_score < 0.05
+
+MERGE (u1)-[r:FLOOD_SIMILAR]-(u2)
+SET r.weight = 1.0 - (abs(u1.flooding_score - u2.flooding_score) / u1.flooding_score);
+
+// Cria arestas de semelhança de sincronicidade
+MATCH (u:User)
+WHERE u.synchronicity_score > 0
+WITH collect(u) as suspiciousSync
+
+UNWIND suspiciousSync as u1
+UNWIND suspiciousSync as u2
+WITH u1, u2
+WHERE u1.id < u2.id
+  AND abs(u1.synchronicity_score - u2.synchronicity_score) / u1.synchronicity_score < 0.05
+
+MERGE (u1)-[r:SYNC_SIMILAR]-(u2)
+SET r.weight = 1.0 - (abs(u1.synchronicity_score - u2.synchronicity_score) / u1.synchronicity_score);
