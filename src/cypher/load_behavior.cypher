@@ -110,7 +110,6 @@ WHERE u1.id < u2.id
 MERGE (u1)-[r:METRONOME_SIMILAR]-(u2)
 SET r.weight = 1.0 - (abs(u1.metronome_score - u2.metronome_score) / u1.metronome_score);
 
-
 // Cria scores de compartilhamentos
 MATCH (u:User)
 // Score de compartilhamentos geral
@@ -187,6 +186,44 @@ WHERE total_msgs > 0 AND sum_global_popularity > 0
 SET u.content_originality = toFloat(unique_texts) / total_msgs,
     u.content_uniqueness = toFloat(unique_texts) / sum_global_popularity;
 
+// Cria similarity edges de originalidade e singularidade de conteúdo
+CREATE INDEX user_content_originality IF NOT EXISTS
+FOR (u:User) ON (u.content_originality);
+
+MATCH (u:User)
+WHERE u.content_originality > 0 AND u.content_originality < 0.5
+
+WITH u, round(u.content_originality, 2) as score_bin
+WITH score_bin, collect(u) as suspicious_users
+
+WHERE size(suspicious_users) > 1
+
+UNWIND suspicious_users as u1
+UNWIND suspicious_users as u2
+WITH u1, u2
+WHERE u1.id < u2.id
+  AND abs(u1.content_originality - u2.content_originality) < 0.05
+
+MERGE (u1)-[r:CONTENT_ORIGINALITY_SIMILAR]-(u2)
+SET r.weight = 1.0 - abs(u1.content_originality - u2.content_originality);
+
+MATCH (u:User)
+WHERE u.content_uniqueness > 0 AND u.content_uniqueness < 0.1
+
+WITH u, round(u.content_uniqueness * 1000, 0) as score_bin
+WITH score_bin, collect(u) as echo_chamber_users
+
+WHERE size(echo_chamber_users) > 1
+
+UNWIND echo_chamber_users as u1
+UNWIND echo_chamber_users as u2
+WITH u1, u2
+WHERE u1.id < u2.id
+  AND abs(u1.content_uniqueness - u2.content_uniqueness) < 0.005
+
+MERGE (u1)-[r:CONTENT_UNIQUENESS_SIMILAR]-(u2)
+SET r.weight = 1.0 - (abs(u1.content_uniqueness - u2.content_uniqueness) * 100);
+
 // Cria score de diversidade de conexões
 MATCH (u:User)-[:SHARES]-(other:User)
 WHERE other.id_most_active_group IS NOT NULL
@@ -198,3 +235,21 @@ WITH u,
 WHERE total_partners > 0
 
 SET u.network_diversity = toFloat(unique_groups) / total_partners;
+
+// Cria similarity edges para diversidade de conexões
+CREATE INDEX user_network_diversity IF NOT EXISTS
+FOR (u:User) ON (u.network_diversity);
+
+MATCH (u:User)
+WHERE u.network_diversity > 0
+WITH collect(u) AS users
+
+UNWIND users AS u1
+UNWIND users AS u2
+WITH u1, u2
+WHERE u1.id < u2.id
+  AND abs(u1.network_diversity - u2.network_diversity) / u1.network_diversity < 0.05
+
+MERGE (u1)-[r:NETWORK_DIVERSITY_SIMILAR]-(u2)
+SET r.weight =
+    1.0 - (abs(u1.network_diversity - u2.network_diversity) / u1.network_diversity);
