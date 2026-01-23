@@ -23,7 +23,7 @@ def rank_bot_suspicion(G, weight_col='weight'):
         norm_str = str_val / max_str
         
         # Heuristic: 40% Topology (PageRank), 40% Cohesion (Clustering), 20% Volume (Strength)
-        composite_score = (0.4 * norm_pr) + (0.4 * norm_cl) + (0.2 * norm_str)
+        composite_score = (0.35 * norm_pr) + (0.35 * norm_cl) + (0.3 * norm_str)
         
         bot_data.append({
             'user_id': node,

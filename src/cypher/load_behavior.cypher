@@ -44,14 +44,14 @@ MATCH (t)<-[:HAS_TEXT]-(m2:Mensagem)<-[:SENT]-(u2:User)
 
 WHERE u1.id < u2.id
   AND m1.date_message.hour = m2.date_message.hour
+WITH u1, u2, date(m1.date_message) as shared_day
 
-WITH u1, u2,
-     count(*) AS hourly_shared_count
+WITH u1, u2, count(DISTINCT shared_day) as distinct_days_shared
 
-WHERE hourly_shared_count >= 2
+WHERE distinct_days_shared >= 2
 
 MERGE (u1)-[r:HOURLY_SHARED]-(u2)
-SET r.weight = hourly_shared_count;
+SET r.weight = distinct_days_shared;
 
 // Cria score de sincronicidade entre usuários que compartilharam mensagens muito rapidamente
 MATCH (u:User)-[r:RAPID_SHARE]-(target:User)
@@ -63,19 +63,44 @@ MATCH (u:User)-[:SENT]->(m:Mensagem)
 WITH u, m ORDER BY m.date_message ASC
 WITH u, collect(m.date_message) as timestamps
 
-WHERE size(timestamps) > 5
+WHERE size(timestamps) > 10
+
 WITH u, 
      [i in range(0, size(timestamps)-2) | 
-        duration.between(timestamps[i], timestamps[i+1]).seconds] as delays
+        duration.between(timestamps[i], timestamps[i+1]).seconds] as raw_delays
 
-UNWIND delays as delay
-WITH u, 
-     avg(delay) as avg_delay,
-     stDev(delay) as std_dev_delay
-SET u.metronome_score = CASE 
-    WHEN avg_delay > 0 THEN std_dev_delay / avg_delay 
-    ELSE 0.0 
-END;
+WITH u, raw_delays, size(raw_delays) as total_count, 2.0 as delta
+
+UNWIND raw_delays as delay
+WITH u, total_count, 
+     round(toFloat(delay) / delta) * delta as binned_delay
+
+WITH u, total_count, binned_delay, count(*) as bin_freq
+ORDER BY bin_freq DESC
+
+WITH u, total_count, 
+     collect(bin_freq)[0] as max_freq_bin
+
+SET u.metronome_score = toFloat(max_freq_bin) / total_count;
+
+//
+// MATCH (u:User)-[:SENT]->(m:Mensagem)
+// WITH u, m ORDER BY m.date_message ASC
+// WITH u, collect(m.date_message) as timestamps
+
+// WHERE size(timestamps) > 5
+// WITH u, 
+//      [i in range(0, size(timestamps)-2) | 
+//         duration.between(timestamps[i], timestamps[i+1]).seconds] as delays
+
+// UNWIND delays as delay
+// WITH u, 
+//      avg(delay) as avg_delay,
+//      stDev(delay) as std_dev_delay
+// SET u.metronome_score = CASE 
+//     WHEN avg_delay > 0 THEN std_dev_delay / avg_delay 
+//     ELSE 0.0 
+// END;
 
 // Cria arestas de semelhança de sincronicidade
 CREATE INDEX user_sync_score IF NOT EXISTS FOR (u:User) ON (u.synchronicity_score);
@@ -98,7 +123,7 @@ SET r.weight = 1.0 - (abs(u1.synchronicity_score - u2.synchronicity_score) / u1.
 CREATE INDEX user_metronome_score IF NOT EXISTS FOR (u:User) ON (u.metronome_score);
 
 MATCH (u:User)
-WHERE u.metronome_score > 0 
+WHERE u.metronome_score > 0.2 
 WITH collect(u) as scoredUsers
 
 UNWIND scoredUsers as u1
@@ -108,7 +133,7 @@ WHERE u1.id < u2.id
   AND abs(u1.metronome_score - u2.metronome_score) / u1.metronome_score < 0.05
 
 MERGE (u1)-[r:METRONOME_SIMILAR]-(u2)
-SET r.weight = 1.0 - (abs(u1.metronome_score - u2.metronome_score) / u1.metronome_score);
+SET r.weight = ( (u1.metronome_score + u2.metronome_score) / 2.0 ) * ( 1.0 - (abs(u1.metronome_score - u2.metronome_score) / u1.metronome_score) );
 
 // Cria scores de compartilhamentos
 MATCH (u:User)
